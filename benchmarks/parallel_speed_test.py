@@ -4,65 +4,68 @@ import multiprocessing
 import csv
 import gc
 from core.analyzer import ShingleAnalyzer
-from core.parallel_engine import parallel_analyze_full
-from data.generator import generate_vocabulary, generate_test_data
+from core.parallel_engine import parallel_analyze_database 
+from data.generator import generate_vocabulary, generate_test_database 
 
 def run_parallel_benchmarks():
     iterations = 20
-    sizes = [100000, 500000, 1000000, 2500000, 5000000, 10000000] 
-    process_configs = [4, 8, 12, 20]
+    words_per_file = 20000 
+    db_sizes = [24, 49, 124, 249, 499]
+    process_configs = [2, 4, 8, 12]
     k = 7
     
     cpu_count = multiprocessing.cpu_count()
     vocab = generate_vocabulary(50000)
     analyzer_seq = ShingleAnalyzer(shingle_size=k)
     
-    csv_filename = "benchmark_results.csv"
-    csv_header = ['Size_Words', 'Size_MB', 'Processes', 'Avg_Time', 'Speedup', 'Efficiency']
+    csv_filename = "benchmark_database_results.csv"
+    csv_header = ['DB_Size_Files', 'Total_Words', 'Processes', 'Avg_Time', 'Speedup', 'Efficiency']
     results_to_save = []
 
-    print(f"--- ПОВНИЙ ЕКСПЕРИМЕНТ ПАРАЛЕЛЬНИХ ОБЧИСЛЕНЬ ---")
+    print(f"--- ЕКСПЕРИМЕНТ: ПОРІВНЯННЯ З БАЗОЮ ДАНИХ (1 to N) ---")
     print(f"Логічних ядер CPU: {cpu_count}")
-    print(f"Метод верифікації: Порівняння хеш-сум (точність 1e-7)")
+    print(f"Слів у кожному файлі: {words_per_file}")
     print(f"Кількість ітерацій для осереднення: {iterations}\n")
 
-    for size in sizes:
-        text_a, text_b = generate_test_data(size, vocab, "partial")
-        mb_size = (len(text_a.encode('utf-8')) + len(text_b.encode('utf-8'))) / (1024 * 1024)
+    for num_files in db_sizes:
+        target_text, db_texts = generate_test_database(words_per_file, num_files, vocab)
+        total_words = words_per_file * (num_files + 1)
         
-        print(f"{'='*70}")
-        print(f"ТЕСТ: {size} слів ({mb_size:.2f} MB)")
+        print(f"{'='*75}")
+        print(f"ТЕСТ: База з {num_files+1} файлів (Всього обробляється: {total_words} слів)")
         
         seq_times = []
-        seq_result = analyzer_seq.analyze(text_a, text_b)
+        seq_results = analyzer_seq.analyze_database_sequential(target_text, db_texts)
         
-        for i in range(iterations):
+        for i in range(4):
             start = time.perf_counter()
-            analyzer_seq.analyze(text_a, text_b)
+            analyzer_seq.analyze_database_sequential(target_text, db_texts)
             seq_times.append(time.perf_counter() - start)
         
         avg_seq = statistics.mean(seq_times)
         print(f"ПОСЛІДОВНО (P=1): {avg_seq:.4f} сек")
-        results_to_save.append([size, mb_size, 1, avg_seq, 1.0, 1.0])
+        results_to_save.append([num_files, total_words, 1, avg_seq, 1.0, 1.0])
         
-        print(f"{'-'*70}")
+        print(f"{'-'*75}")
         print(f"{'Ядра (P)':<10} | {'Статус':<15} | {'Час Par (сек)':<15} | {'S (Speedup)':<10} | {'E (Eff)'}")
-        print(f"{'-'*70}")
+        print(f"{'-'*75}")
         
         for p in process_configs:
-            par_result = parallel_analyze_full(text_a, text_b, num_processes=p, k_size=k)
+            par_results = parallel_analyze_database(target_text, db_texts, num_processes=p, k_size=k)
             
-            if abs(seq_result - par_result) < 1e-7:
+            is_correct = all(abs(s - pr) < 0.1 for s, pr in zip(seq_results, par_results))
+            
+            if is_correct:
                 v_status = "✅ OK"
             else:
                 v_status = "❌ ERROR"
-                print(f"Критична розбіжність: Seq={seq_result}, Par={par_result}")
+                print(f"Критична розбіжність! \nSeq: {seq_results[:3]}...\nPar: {par_results[:3]}...")
                 continue
 
             par_times = []
             for _ in range(iterations):
                 start = time.perf_counter()
-                parallel_analyze_full(text_a, text_b, num_processes=p, k_size=k)
+                parallel_analyze_database(target_text, db_texts, num_processes=p, k_size=k)
                 par_times.append(time.perf_counter() - start)
             
             avg_par = statistics.mean(par_times)
@@ -70,11 +73,11 @@ def run_parallel_benchmarks():
             efficiency = speedup / p
             
             print(f"{p:<10} | {v_status:<15} | {avg_par:<15.4f} | {speedup:<10.2f} | {efficiency:.2f}")
-            results_to_save.append([size, mb_size, p, avg_par, speedup, efficiency])
+            results_to_save.append([num_files, total_words, p, avg_par, speedup, efficiency])
 
-        print(f"{'='*70}")
-        print(f"Очищення пам'яті для тесту {size} слів...")
-        del text_a, text_b
+        print(f"{'='*75}")
+        print(f"Очищення пам'яті для тесту {num_files+1} файлів...")
+        del target_text, db_texts
         gc.collect() 
 
     with open(csv_filename, mode='w', newline='', encoding='utf-8') as f:

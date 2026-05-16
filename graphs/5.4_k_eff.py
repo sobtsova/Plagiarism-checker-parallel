@@ -1,7 +1,13 @@
 import pandas as pd
 import matplotlib.pyplot as plt
+import os
 
-df = pd.read_csv('shingle_k_results.csv')
+output_dir = 'graphs/results'
+os.makedirs(output_dir, exist_ok=True)
+
+current_dir = os.path.dirname(os.path.abspath(__file__))
+file_path = os.path.abspath(os.path.join(current_dir, '..', 'data', 'results', 'benchmark_k_results.csv'))
+df = pd.read_csv(file_path)
 
 plt.rcParams.update({'font.size': 11}) 
 fig, ax1 = plt.subplots(figsize=(10, 6))
@@ -27,5 +33,6 @@ labels = [l.get_label() for l in lines]
 ax1.legend(lines, labels, loc='center right', fontsize=10)
 
 fig.tight_layout()
-plt.savefig('figure_5_3_k_effect.png', dpi=300)
+save_path = os.path.join(output_dir, '5_4_k_effect.png')
+plt.savefig(save_path, dpi=300)
 plt.show()

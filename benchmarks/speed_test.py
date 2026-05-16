@@ -1,28 +1,31 @@
 import time
 from core.analyzer import ShingleAnalyzer
-from data.generator import generate_vocabulary, generate_test_data
+from data.generator import generate_vocabulary, generate_test_database
 
 def run_benchmarks():
     analyzer = ShingleAnalyzer(shingle_size=7)
     vocabulary = generate_vocabulary(50000)
     
-    print("--- 2.4 ЕКСПЕРИМЕНТАЛЬНІ ЗАМІРИ ШВИДКОДІЇ ---")
-    sizes = [100000, 500000, 1000000, 2500000, 5000000, 10000000]
+    print("--- 2.4 ЕКСПЕРИМЕНТАЛЬНІ ЗАМІРИ ШВИДКОДІЇ (Послідовний алгоритм) ---")
     
-    print(f"{'Кількість слів':<15} | {'Обʼєм (МБ)':<12} | {'Середній час (сек)':<20}")
-    print("-" * 55)
+    words_per_file = 20000  
+    db_sizes = [24, 49, 124, 249, 499]
+    iterations = 20 
     
-    for size in sizes:
-        text_a, text_b = generate_test_data(size, vocabulary, "partial")
-        
-        bytes_size = (len(text_a.encode('utf-8')) + len(text_b.encode('utf-8')))
-        mb_size = bytes_size / (1024 * 1024)
+    print(f"Фіксований розмір файлу: {words_per_file} слів")
+    print(f"{'Кількість файлів':<18} | {'Загалом слів':<15} | {'Середній час (сек)':<20}")
+    print("-" * 60)
+    
+    for num_files in db_sizes:
+        target_text, db_texts = generate_test_database(words_per_file, num_files, vocabulary)
+        analyzer.analyze_database_sequential(target_text, db_texts)
+        total_words = words_per_file * (num_files + 1)
         
         times = []
-        for _ in range(10):
+        for _ in range(iterations):
             start = time.perf_counter()
-            analyzer.analyze(text_a, text_b)
+            analyzer.analyze_database_sequential(target_text, db_texts)
             times.append(time.perf_counter() - start)
         
         avg_time = sum(times) / len(times)
-        print(f"{size:<15} | {mb_size:<12.2f} | {avg_time:.6f}")
+        print(f"{num_files+1:<18} | {total_words:<15} | {avg_time:.6f}")

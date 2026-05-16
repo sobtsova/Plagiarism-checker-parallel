@@ -1,24 +1,41 @@
-import re
 import hashlib
+import string
+
+def canonicalize_logic(text, stop_words):
+    translator = str.maketrans('', '', string.punctuation)
+    text = text.translate(translator).lower()
+    words = text.split()
+    return [w for w in words if w not in stop_words]
 
 class ShingleAnalyzer:
+    def analyze_database_sequential(self, target_text, db_texts):
+        """Послідовно порівнює цільовий файл із базою"""
+        target_tokens = self.canonicalize(target_text)
+        target_hashes = self.create_hashes(target_tokens)
+        
+        results = []
+        for db_text in db_texts:
+            db_tokens = self.canonicalize(db_text)
+            db_hashes = self.create_hashes(db_tokens)
+            sim = self.get_similarity(target_hashes, db_hashes)
+            results.append(sim)
+        return results
+    
     def __init__(self, shingle_size=7):
         self.k = shingle_size
-        self.stop_words = {'і', 'та', 'на', 'в', 'що', 'як', 'якщо', 'але', 'це', 'про', 'до'}
+        self.stop_words = {'і', 'та', 'на', 'в', 'що', 'як', 'якщо', 'але', 'це', 'про', 'до', 'для'}
+        self.translator = str.maketrans('', '', string.punctuation)
 
     def canonicalize(self, text):
-        text = text.lower()
-        text = re.sub(r'[^\w\s]', '', text)
-        words = text.split()
-        return [w for w in words if w not in self.stop_words]
+        return canonicalize_logic(text, self.stop_words)
 
     def create_hashes(self, words):
         if len(words) < self.k:
             return set()
         hashes = set()
         for i in range(len(words) - self.k + 1):
-            shingle = " ".join(words[i : i + self.k])
-            h = hashlib.sha256(shingle.encode('utf-8')).hexdigest()
+            shingle = " ".join(words[i : i + self.k]).encode('utf-8')
+            h = int.from_bytes(hashlib.md5(shingle).digest()[:8], 'little')
             hashes.add(h)
         return hashes
 

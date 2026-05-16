@@ -1,41 +1,47 @@
 import multiprocessing
 import hashlib
-from core.analyzer import ShingleAnalyzer
+from core.analyzer import canonicalize_logic
 
-def _worker_hashing(args):
-    tokens_chunk, k = args
-    hashes = set()
+_target_hashes = None
+_k = None
+_stop_words = None
+
+def _init_worker(target_hashes, k, stop_words):
+    global _target_hashes, _k, _stop_words
+    _target_hashes = target_hashes
+    _k = k
+    _stop_words = stop_words
+
+def _worker_task(db_text):
+    global _target_hashes, _k, _stop_words
+    tokens = canonicalize_logic(db_text, _stop_words)
     
-    for i in range(len(tokens_chunk) - k + 1):
-        shingle = " ".join(tokens_chunk[i : i + k])
-        h = hashlib.sha256(shingle.encode('utf-8')).hexdigest()
-        hashes.add(h)
-    return hashes
+    db_hashes = set()
+    for i in range(len(tokens) - _k + 1):
+        shingle = " ".join(tokens[i : i + _k]).encode('utf-8')
+        h = int.from_bytes(hashlib.md5(shingle).digest()[:8], 'little')
+        db_hashes.add(h)
+    
+    if not _target_hashes or not db_hashes: return 0.0
+    return (len(_target_hashes & db_hashes) / len(_target_hashes | db_hashes)) * 100
+
+def parallel_analyze_database(target_text, db_texts, num_processes, k_size=7):
+    from core.analyzer import ShingleAnalyzer
+    analyzer = ShingleAnalyzer(shingle_size=k_size)
+    
+    target_tokens = analyzer.canonicalize(target_text)
+    target_hashes = analyzer.create_hashes(target_tokens)
+
+    with multiprocessing.Pool(
+        processes=num_processes,
+        initializer=_init_worker,
+        initargs=(target_hashes, k_size, analyzer.stop_words)
+    ) as pool:
+        results = pool.map(_worker_task, db_texts)
+
+    return results
 
 def parallel_analyze_full(text_a, text_b, num_processes, k_size=7):
-    analyzer = ShingleAnalyzer(shingle_size=k_size)
+    results = parallel_analyze_database(text_a, [text_b], num_processes, k_size)
 
-    tokens_a = analyzer.canonicalize(text_a)
-    tokens_b = analyzer.canonicalize(text_b)
-
-    def get_token_chunks(tokens, n, k):
-        if not tokens or len(tokens) < k: return []
-        chunk_size = max(len(tokens) // n, 1)
-        chunks = []
-        for i in range(n):
-            start = i * chunk_size
-            end = len(tokens) if i == n - 1 else (i + 1) * chunk_size + (k - 1)
-            chunks.append(tokens[start:end])
-        return chunks
-    
-    chunks_a = get_token_chunks(tokens_a, num_processes, k_size)
-    chunks_b = get_token_chunks(tokens_b, num_processes, k_size)
-
-    with multiprocessing.Pool(processes=num_processes) as pool:
-        res_a = pool.map(_worker_hashing, [(c, k_size) for c in chunks_a])
-        res_b = pool.map(_worker_hashing, [(c, k_size) for c in chunks_b])
-
-    final_a = set().union(*res_a) if res_a else set()
-    final_b = set().union(*res_b) if res_b else set()
-
-    return analyzer.get_similarity(final_a, final_b)
+    return results[0] if results else 0.0
